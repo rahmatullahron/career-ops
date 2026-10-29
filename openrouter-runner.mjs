@@ -41,6 +41,13 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+
+// Ambient privacy guard over global fetch. Installed explicitly here (rather
+// than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
+// checkout. Idempotent — a second install is a no-op.
+installPiiInterceptor();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -276,6 +283,9 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const ctrl = new AbortController();
     const timerId = setTimeout(() => ctrl.abort(), MODEL_TIMEOUT_MS);
     try {
+      // Privacy gate: the complete serialized request is inspected after prompt
+      // construction and before the network call. Throws (nothing sent) on a hit.
+      assertLlmRequestAllowed(OPENROUTER_API_URL, body);
       const resp = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
@@ -337,6 +347,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const timerId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
       let data;
       try {
+        // Privacy gate (rotation path). Same rule as the pinned-model path above.
+        assertLlmRequestAllowed(OPENROUTER_API_URL, body);
         const resp = await fetch(OPENROUTER_API_URL, {
           method: 'POST',
           headers: {
@@ -372,6 +384,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       return { content, usage };
 
     } catch (e) {
+      if (e?.code === 'PRIVACY_GUARD_BLOCKED') throw e;
       lastError = e;
       const msg = e.message.split('\n')[0];
 

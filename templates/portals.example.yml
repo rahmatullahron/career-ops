@@ -3366,6 +3366,11 @@ tracked_companies:
     notes: "PageUp. US tenants use the en-us locale segment. 367 postings when checked."
     enabled: false
 
+  - name: Freshworks
+    careers_url: https://careers.smartrecruiters.com/freshworks
+    notes: "SmartRecruiters. 123 postings when checked."
+    enabled: true
+
 # ── Job Boards ────────────────────────────────────────────────────────
 # Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),
 # job boards return offers from many companies in a single API call.

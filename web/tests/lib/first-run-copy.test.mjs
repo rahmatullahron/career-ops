@@ -9,7 +9,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 test("first-run home does not claim no setup", () => {
   const src = readFileSync(join(root, "src/components/home/first-run-home.tsx"), "utf8");
   assert.doesNotMatch(src, /No setup/);
-  assert.match(src, /PDF needs an AI CLI/);
+  // A PDF or Word file is parsed only when the running CLI is Claude Code.
+  // Saying "an AI CLI" sent people to Config, then the upload still failed.
+  assert.match(src, /A PDF or Word file only works with Claude Code/);
+  assert.doesNotMatch(src, /PDF needs an AI CLI/);
 });
 
 test("pasted CV text can start without a CLI", () => {
@@ -17,4 +20,13 @@ test("pasted CV text can start without a CLI", () => {
   assert.match(src, /Pasted text is already readable/);
   assert.match(src, /setPhase\("review"\)/);
   assert.match(src, /setSeed\(null\)/);
+});
+
+test("review does not say the CV is saved before Save", () => {
+  const src = readFileSync(join(root, "src/components/cv/cv-ingest.tsx"), "utf8");
+  assert.match(src, /Nothing is saved until you click Save/);
+  assert.doesNotMatch(src, /Saved locally to cv\.md/);
+  assert.match(src, /Stays on this computer/);
+  assert.doesNotMatch(src, /Parsed by your own AI/);
+  assert.match(src, /A PDF or Word file only works with Claude Code/);
 });

@@ -216,7 +216,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             </button>
             <input ref={fileRef} type="file" accept=".pdf,.md,.markdown,.txt,.docx" hidden onChange={(e) => e.target.files?.[0] && ingestFile(e.target.files[0])} />
             <span className="inline-flex items-center gap-1 text-[11px] text-faint">
-              <Lock className="size-3" /> Stays on your machine. Parsed by your own AI.
+              <Lock className="size-3" /> Stays on this computer.
             </span>
             <button
               type="button"
@@ -232,9 +232,9 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           (err === "needs-cli" ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-700 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
-              <span>To read a PDF or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
+              <span>A PDF or Word file only works with Claude Code. Paste the text, or drop a .md or .txt file.</span>
               <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-500/30 dark:text-amber-200">
-                Connect your AI CLI <ArrowRight className="size-3.5" />
+                Open Config <ArrowRight className="size-3.5" />
               </Link>
             </div>
           ) : (
@@ -320,7 +320,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           <RotateCcw className="size-3.5" /> Start over
         </button>
         <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
-          <Lock className="size-3" /> Saved locally to cv.md
+          <Lock className="size-3" /> Nothing is saved until you click Save.
         </span>
       </div>
     </div>

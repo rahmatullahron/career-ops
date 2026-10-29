@@ -398,23 +398,49 @@ export type ReportData = { content: string; file: string };
  *  empty sentinel instead of the real report, making the report body and the
  *  Apply/PDF-ready checks disappear. */
 export function findReportFile(n: string): string | null {
-  if (!/^\d+$/.test(n)) return null;
-  const target = Number(n);
+  const target = reportNumber(n);
+  if (target === null) return null;
   const root = careerOpsRoot();
   const app = readApplications().find((a) => parseInt(a.n, 10) === target);
-  const linked = firstMarkdownLinkTarget(app?.report);
+  return resolveReportFile(target, app?.report, root, () => listReportFiles(root));
+}
+
+export function requestReportReader(): (app: Pick<Application, "n" | "report">) => ReportData | null {
+  const root = careerOpsRoot();
+  let files: string[] | null | undefined;
+  const listReports = () => (files === undefined ? (files = listReportFiles(root)) : files);
+  return (app) => {
+    const target = reportNumber(app.n);
+    return target === null ? null : readReportFile(resolveReportFile(target, app.report, root, listReports));
+  };
+}
+
+function reportNumber(n: string): number | null {
+  return /^\d+$/.test(n) ? Number(n) : null;
+}
+
+function listReportFiles(root: string): string[] | null {
+  try {
+    return fs.readdirSync(path.join(root, "reports"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+function resolveReportFile(
+  target: number,
+  report: string | undefined,
+  root: string,
+  listReports: () => string[] | null,
+): string | null {
+  const linked = firstMarkdownLinkTarget(report);
   if (linked) {
     const p = path.resolve(root, "data", linked);
     // Containment: a hand-edited link must not resolve outside the project.
     if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
-  let files: string[];
-  try {
-    files = fs.readdirSync(path.join(root, "reports"));
-  } catch {
-    return null;
-  }
-  const match = files.find(
+  const match = listReports()?.find(
     (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
   );
   if (!match) return null;
@@ -441,7 +467,10 @@ export function isRegularContainedFile(p: string, root: string): boolean {
 }
 
 export function readReport(n: string): ReportData | null {
-  const file = findReportFile(n);
+  return readReportFile(findReportFile(n));
+}
+
+function readReportFile(file: string | null): ReportData | null {
   if (!file) return null;
   try {
     // Reports live in the user's runtime checkout, outside the web build graph.

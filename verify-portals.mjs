@@ -897,16 +897,36 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   // execute a configured local command.
   if (providers && providers.size > 0) {
     const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
+    // A typo in provider: used to take the same skip line as a URL nothing
+    // claims, and the error text was thrown away.
+    if (resolved?.error) {
+      return {
+        name,
+        status: 'missing',
+        errorKind: 'unknown',
+        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
+        reason: resolved.error,
+      };
+    }
     if (resolved && resolved.provider) {
       const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
       return { name, ...probe };
+    }
+    const full = resolveProvider(company, providers);
+    if (full?.provider?.id === 'local-parser') {
+      return {
+        name,
+        status: 'skipped',
+        provider: 'local-parser',
+        reason: 'local parser; verify-portals does not run it. Use scan.mjs to read this board.',
+      };
     }
   }
 
   return {
     name,
     status: 'skipped',
-    reason: 'no provider matched careers_url or api',
+    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method.',
   };
 }
 

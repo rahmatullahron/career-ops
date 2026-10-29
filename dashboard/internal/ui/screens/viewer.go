@@ -62,10 +62,13 @@ func NewViewerModel(t theme.Theme, careerOpsPath, path, title string, width, hei
 	if len(content) > 0 {
 		lines = strings.Split(string(content), "\n")
 	}
+	for i, line := range lines {
+		lines[i] = data.SanitizeTerminalText(line)
+	}
 
 	m := ViewerModel{
 		lines:           lines,
-		title:           title,
+		title:           data.SanitizeTerminalText(title),
 		width:           width,
 		height:          height,
 		theme:           t,

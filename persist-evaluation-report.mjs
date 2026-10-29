@@ -38,7 +38,7 @@ function textProblem(name, value) {
 /**
  * @param {string} root
  * @param {object} payload
- * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {Pick<typeof fs, "mkdirSync"|"openSync"|"closeSync"|"fstatSync"|"lstatSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
 export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
@@ -105,16 +105,26 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
-  const existed = fsImpl.existsSync(filePath);
-  attempted.push({ filePath, existed });
-  fsImpl.writeFileSync(filePath, content, "utf8");
+  const fd = fsImpl.openSync(filePath, "wx");
+  const created = { filePath, identity: null };
+  attempted.push(created);
+  try {
+    created.identity = fsImpl.fstatSync(fd);
+    fsImpl.writeFileSync(fd, content, "utf8");
+  } finally {
+    fsImpl.closeSync(fd);
+  }
 }
 
 function cleanupNew(fsImpl, attempted) {
   const problems = [];
-  for (const { filePath, existed } of attempted) {
-    if (existed) continue;
+  for (const { filePath, identity } of attempted) {
+    if (!identity) continue;
     try {
+      // A concurrent atomic save owns the replacement, even at the same path.
+      const current = fsImpl.lstatSync(filePath);
+      if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino
+          || current.birthtimeMs !== identity.birthtimeMs) continue;
       fsImpl.unlinkSync(filePath);
     } catch (err) {
       if (err?.code !== "ENOENT") problems.push(err.message);

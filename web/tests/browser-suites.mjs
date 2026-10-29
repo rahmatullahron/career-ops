@@ -54,6 +54,7 @@ const SUITES = {
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
+  "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
   "evaluation-options": { url: "EVALUATION_OPTIONS_TEST_URL", fixture: "inbox-undo" },
   "followups-loading": { url: "FOLLOWUPS_LOADING_TEST_URL", root: "FOLLOWUPS_LOADING_TEST_ROOT", fixture: "pipeline-status" },

@@ -17,7 +17,7 @@ const read = fs.readFileSync;
 let paused = false;
 fs.readFileSync = (path, ...options) => {
   const bytes = read(path, ...options);
-  if (String(path) === process.env.STATE_PATH && process.env.SCAN_READY && !paused) {
+  if (String(path) === (process.env.SOURCE_PATH || process.env.STATE_PATH) && process.env.SCAN_READY && !paused) {
     paused = true;
     fs.writeFileSync(process.env.SCAN_READY, 'scanned');
     const deadline = Date.now() + 30000;
@@ -94,4 +94,66 @@ try {
   check('a stale ingested scan records no source after waiting for a newer writer', () => {
     assert.match(staleResult.stdout, /Recorded 0 source/);
   });
+  for (const wasRecorded of [false, true]) {
+    const source = `cv/stale-${wasRecorded ? 'changed' : 'new'}.md`;
+    const document = join(root, 'documents', source);
+    if (wasRecorded) {
+      writeFileSync(document, '# Previously confirmed source A\n');
+      const seeded = await child('intake.mjs', ['--commit', source]);
+      assert.equal(seeded.status, 0, seeded.stderr);
+    }
+    writeFileSync(document, '# Scanned source B\n');
+    const ready = join(root, `ready-${wasRecorded}`), resume = join(root, `resume-${wasRecorded}`);
+    const stale = child('intake.mjs', ['--commit', source], { SCAN_READY: ready, SCAN_RESUME: resume });
+    let current;
+    try {
+      const deadline = Date.now() + 30000;
+      while (!existsSync(ready)) {
+        assert.ok(Date.now() < deadline, 'stale candidate did not reach the barrier');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      writeFileSync(document, '# Newly confirmed source C\n');
+      const confirmed = await child('intake.mjs', ['--commit', source]);
+      assert.equal(confirmed.status, 0, confirmed.stderr);
+      assert.match(confirmed.stdout, /Recorded 1 source/);
+      current = JSON.parse(readFileSync(statePath, 'utf8')).ingested;
+    } finally { writeFileSync(resume, 'resume'); }
+    const result = await stale;
+    check(`a scan-time ${wasRecorded ? 'changed' : 'new'} source preserves a newer confirmation`, () => {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).ingested, current);
+      assert.match(result.stdout, /Recorded 0 source/);
+    });
+  }
+  for (const wasRecorded of [false, true]) {
+    const source = `cv/early-stale-${wasRecorded ? 'changed' : 'new'}.md`;
+    const document = join(root, 'documents', source);
+    if (wasRecorded) {
+      writeFileSync(document, '# Previously confirmed early source A\n');
+      const seeded = await child('intake.mjs', ['--commit', source]);
+      assert.equal(seeded.status, 0, seeded.stderr);
+    }
+    writeFileSync(document, '# Read early source B\n');
+    const ready = join(root, `early-ready-${wasRecorded}`), resume = join(root, `early-resume-${wasRecorded}`);
+    const stale = child('intake.mjs', ['--commit', source], { SOURCE_PATH: document, SCAN_READY: ready, SCAN_RESUME: resume });
+    let current;
+    try {
+      const deadline = Date.now() + 30000;
+      while (!existsSync(ready)) {
+        assert.ok(Date.now() < deadline, 'source read did not reach the barrier');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      writeFileSync(document, '# Confirmed early source C\n');
+      const confirmed = await child('intake.mjs', ['--commit', source]);
+      assert.equal(confirmed.status, 0, confirmed.stderr);
+      assert.match(confirmed.stdout, /Recorded 1 source/);
+      current = JSON.parse(readFileSync(statePath, 'utf8')).ingested;
+    } finally { writeFileSync(resume, 'resume'); }
+    const result = await stale;
+    check(`a ${wasRecorded ? 'changed' : 'new'} source read before a newer ledger confirmation preserves it`, () => {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).ingested, current);
+      assert.match(result.stdout, /Recorded 0 source/);
+    });
+  }
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }

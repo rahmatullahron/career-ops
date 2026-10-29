@@ -82,3 +82,44 @@ if (routedModes.length < 20) {
 } else {
   fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
 }
+
+// Discovery menu parity (#6214):
+// The menu is what the agent prints on `/career-ops` with no arguments or an
+// unknown sub-command. It must list every mode routed by the routing table so
+// users can discover it, and must not understate evaluation scope as A-F.
+const menu = skill.match(/Available commands:\n([\s\S]*?)\n```/)?.[1] ?? '';
+if (menu.length < 50) {
+  fail('could not read the discovery menu block from SKILL.md');
+} else {
+  if (menu.includes('A-F')) {
+    fail('discovery menu describes oferta as "A-F" instead of "A-H"');
+  } else {
+    pass('discovery menu does not describe evaluation as A-F');
+  }
+
+  const menuCommands = [...menu.matchAll(/^\s*\/career-ops\s+([a-z0-9/_-]+|\{JD\})\s+→/gm)].map((m) => m[1]);
+  const menuSet = new Set(menuCommands);
+  const routedInputs = [...skill.matchAll(/^\|\s*`([a-z0-9/_-]+)`\s*\|\s*`([^`]+)`\s*\|$/gm)].map((m) => m[1]);
+  const KNOWN_ALIASES = new Set(['inbox']);
+
+  const missingFromMenu = routedInputs
+    .filter((cmd) => !KNOWN_ALIASES.has(cmd))
+    .filter((cmd) => !menuSet.has(cmd));
+
+  if (missingFromMenu.length === 0) {
+    pass('all routed modes appear in the discovery menu');
+  } else {
+    fail(`routed modes missing from the discovery menu: ${missingFromMenu.join(', ')}`);
+  }
+
+  const routedInputSet = new Set(routedInputs);
+  const unroutedInMenu = menuCommands
+    .filter((cmd) => cmd !== '{JD}')
+    .filter((cmd) => !routedInputSet.has(cmd));
+
+  if (unroutedInMenu.length === 0) {
+    pass('all discovery menu commands correspond to routed modes in the routing table');
+  } else {
+    fail(`discovery menu commands not in the routing table: ${unroutedInMenu.join(', ')}`);
+  }
+}

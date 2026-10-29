@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
@@ -22,6 +23,12 @@ export const dynamic = "force-dynamic";
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Short id of the profile bytes the form loaded. A later save sends it back
+ *  so a second tab cannot write a stale snapshot over a save that already landed. */
+function textRevision(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
 /**
@@ -79,10 +86,13 @@ export async function GET() {
   const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   let enabled = true;
+  let revision: string | null = null;
   if (fs.existsSync(file)) {
     let profile: Record<string, unknown> = {};
     try {
-      const parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      const raw = fs.readFileSync(file, "utf8");
+      revision = textRevision(raw);
+      const parsed = yaml.load(raw);
       profile = isObj(parsed) ? parsed : {};
     } catch {
       /* unreadable/malformed → show defaults (read is best-effort) */
@@ -98,7 +108,7 @@ export async function GET() {
   // `defaultsAvailable: false` tells the form to render its placeholders as
   // unknown rather than inventing a number — an honest gap beats a stale copy.
   const effective = { ...(defaults ?? {}), ...overrides };
-  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective, enabled });
+  return Response.json({ defaults: defaults ?? {}, defaultsAvailable: defaults !== null, overrides, effective, enabled, revision });
 }
 
 export async function POST(req: Request) {
@@ -126,6 +136,7 @@ export async function POST(req: Request) {
   const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
   let source = "";
+  let currentRevision: string | null = null;
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
@@ -142,6 +153,7 @@ export async function POST(req: Request) {
     let parsed: unknown;
     try {
       source = fs.readFileSync(file, "utf8");
+      currentRevision = textRevision(source);
       parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
@@ -154,6 +166,15 @@ export async function POST(req: Request) {
     base = parsed as Record<string, unknown>;
   }
 
+  // Optional. Clients that omit it keep the old merge. Clients that send the
+  // revision from GET are refused when another save changed the file first.
+  if (typeof body.revision === "string" && body.revision !== currentRevision) {
+    return Response.json({
+      error: "These cadence settings changed in another tab. The saved values were kept.",
+      revision: currentRevision,
+    }, { status: 409 });
+  }
+
   const merged: Record<string, unknown> = { ...base };
   const patch: Parameters<typeof patchProfileText>[1] = {};
   if (Object.keys(cadence).length > 0) {
@@ -164,14 +185,20 @@ export async function POST(req: Request) {
     merged.follow_ups = { ...(isObj(base.follow_ups) ? base.follow_ups : {}), enabled };
     patch.follow_ups = { enabled };
   }
+  let text: string;
   try {
     // Edit only the cadence lines so the rest of the profile, comments
     // included, stays as the user wrote it (#5662). A shape the line edit
     // cannot place falls back to yaml.dump; the backup holds the prior bytes.
-    const text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
     atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
-  return Response.json({ ok: true, followup_cadence: merged.followup_cadence, follow_ups: merged.follow_ups });
+  return Response.json({
+    ok: true,
+    revision: textRevision(text),
+    followup_cadence: merged.followup_cadence,
+    follow_ups: merged.follow_ups,
+  });
 }

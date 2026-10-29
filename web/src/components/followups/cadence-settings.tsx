@@ -28,6 +28,7 @@ export function CadenceSettings() {
   const [error, setError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [toggling, setToggling] = useState(false);
+  const [revision, setRevision] = useState<string | null>(null);
 
   // On a failed load, do NOT fall back to defaults: the user would see 7/7/2/…
   // with no warning and a Save would overwrite their real profile.yml
@@ -45,6 +46,7 @@ export function CadenceSettings() {
         // in. A key the core didn't supply renders empty rather than as an
         // invented number.
         setEnabled(d?.enabled !== false);
+        setRevision(typeof d?.revision === "string" && d.revision ? d.revision : null);
         const eff = (d?.effective ?? {}) as Partial<Record<ProfileCadenceKey, number>>;
         setValues(Object.fromEntries(
           PROFILE_CADENCE_KEYS.map((k) => [k, eff[k] === undefined ? "" : String(eff[k])]),
@@ -73,12 +75,15 @@ export function CadenceSettings() {
       const res = await fetch("/api/followups/cadence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(revision ? { ...payload, revision } : payload),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
+        setSaved(false);
         setError(typeof j.error === "string" ? j.error : "Could not save.");
+        if (res.status === 409) load();
       } else {
+        if (typeof j.revision === "string" && j.revision) setRevision(j.revision);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
@@ -189,7 +194,7 @@ export function CadenceSettings() {
                 </button>
               </>
             )}
-            {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+            {error && <p role="alert" className="mt-3 text-xs text-red-500">{error}</p>}
           </>
         )}
       </div>

@@ -8,7 +8,8 @@ import remarkGfm from "remark-gfm";
 import { Upload, FileText, Loader2, Check, AlertTriangle, Lock, ArrowRight, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
+import { parseCvStream, type CvSeed } from "@/lib/cv/quality";
+import { cvReadiness } from "@/lib/cv/readiness.mjs";
 import { ingestErrorMessage } from "@/lib/cv/ingest-error.mjs";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
 

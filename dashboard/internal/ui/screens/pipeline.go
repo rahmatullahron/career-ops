@@ -40,6 +40,22 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineCopyPDFPathMsg asks the host to copy a CV PDF's absolute path to the
+// OS clipboard (`y`). Path is absolute.
+type PipelineCopyPDFPathMsg struct {
+	Path string
+}
+
+// PipelineClipboardResultMsg reports the outcome of a PipelineCopyPDFPathMsg.
+// Err is empty on success.
+type PipelineClipboardResultMsg struct {
+	Path string
+	Err  string
+}
+
+// noPDFFlash is shown by `d` and `y` when no CV PDF matches the application.
+const noPDFFlash = "No CV PDF found for this application — generate one with /career-ops pdf"
+
 // PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
 // CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
 // travel back to the pipeline screen as a flash: anything written to stderr is
@@ -520,6 +536,13 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	case PipelineOpenFailedMsg:
 		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
+	case PipelineClipboardResultMsg:
+		if msg.Err != "" {
+			m.flash = "Could not copy CV PDF path to clipboard: " + msg.Err
+		} else {
+			m.flash = "Copied CV PDF path to clipboard: " + msg.Path
+		}
+		return m, nil
 	case StatusUpdateFailedMsg:
 		m.flash = "Could not update status: " + msg.Err
 	case PipelineHistoryFailedMsg:
@@ -669,12 +692,22 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "d":
 		if app, ok := m.CurrentApp(); ok {
-			manifest := data.LoadPDFManifest(m.careerOpsPath)
-			candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
-			if len(candidates) == 0 {
-				m.flash = "No CV PDF found for this application — generate one with /career-ops pdf"
+			if rel, found := m.newestPDF(app); !found {
+				m.flash = noPDFFlash
 			} else {
-				return m, m.openPDFCmd(candidates[0]) // newest first
+				return m, m.openPDFCmd(rel)
+			}
+		}
+
+	case "y":
+		if app, ok := m.CurrentApp(); ok {
+			if rel, found := m.newestPDF(app); !found {
+				m.flash = noPDFFlash
+			} else {
+				fullPath := m.pdfAbsPath(rel)
+				return m, func() tea.Msg {
+					return PipelineCopyPDFPathMsg{Path: fullPath}
+				}
 			}
 		}
 
@@ -1135,9 +1168,25 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 	return m, nil
 }
 
+// newestPDF resolves the newest CV PDF for app (root-relative). Shared by `d`
+// and `y` so both act on the same file.
+func (m PipelineModel) newestPDF(app model.CareerApplication) (string, bool) {
+	manifest := data.LoadPDFManifest(m.careerOpsPath)
+	candidates := data.ResolvePDFs(data.PDFWorkspaceRoot(m.careerOpsPath), app, manifest)
+	if len(candidates) == 0 {
+		return "", false
+	}
+	return candidates[0], true // newest first
+}
+
+// pdfAbsPath turns a root-relative PDF path into an absolute one.
+func (m PipelineModel) pdfAbsPath(relPath string) string {
+	return filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
+}
+
 // openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
 func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
-	fullPath := filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
+	fullPath := m.pdfAbsPath(relPath)
 	return func() tea.Msg {
 		return PipelineOpenPDFMsg{Path: fullPath}
 	}
@@ -2177,6 +2226,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpReport) +
 		keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL) +
 		keyStyle.Render("d") + descStyle.Render(i18n.Current.HelpOpenPDF) +
+		keyStyle.Render("y") + descStyle.Render(i18n.Current.HelpCopyPDF) +
 		keyStyle.Render("D") + descStyle.Render(i18n.Current.HelpRegenPDF) +
 		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) +
 		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +

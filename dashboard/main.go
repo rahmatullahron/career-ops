@@ -258,6 +258,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineOpenPDFMsg:
 		return m, openCmd(msg.Path)
 
+	case screens.PipelineCopyPDFPathMsg:
+		return m, copyPathCmd(msg.Path)
+
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 

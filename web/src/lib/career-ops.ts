@@ -4,7 +4,7 @@ import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
-import { readTrackerFile } from "@/lib/core/tracker-files.mjs";
+import { readTrackerFile, trackerLinkDirs } from "@/lib/core/tracker-files.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
@@ -15,7 +15,7 @@ import { reconcileInbox } from "@/lib/inbox-pending.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
-import { firstMarkdownLinkTarget } from "@/lib/posting-url.mjs";
+import { firstMarkdownLinkTarget, soleMarkdownLinkTarget } from "@/lib/posting-url.mjs";
 import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // Pure parser, no I/O — shared with the apply flow's CV resolver so the two
 // don't drift into two different definitions of "which report does this
@@ -402,12 +402,8 @@ export function findReportFile(n: string): string | null {
   const target = Number(n);
   const root = careerOpsRoot();
   const app = readApplications().find((a) => parseInt(a.n, 10) === target);
-  const linked = firstMarkdownLinkTarget(app?.report);
-  if (linked) {
-    const p = path.resolve(root, "data", linked);
-    // Containment: a hand-edited link must not resolve outside the project.
-    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
-  }
+  const linked = linkedReportFile(app, root);
+  if (linked) return linked;
   let files: string[];
   try {
     files = fs.readdirSync(path.join(root, "reports"));
@@ -420,6 +416,66 @@ export function findReportFile(n: string): string | null {
   if (!match) return null;
   const p = path.join(root, "reports", match);
   return containedRealpath(p, root) ? p : null;
+}
+
+/** The paths a tracker row's own Report link can name, in the order the core
+ *  tries them (tracker-utils.mjs findDeadReportLink): from the tracker's own
+ *  folder (#760), realpathed and then as given (#5374), then from the data
+ *  root for legacy root-relative links. Empty when the cell has no link or the
+ *  link is not a non-reserved `.md`. `readTarget` picks the link from the
+ *  cell. Not checked for containment: callers do that. */
+function linkedReportPaths(
+  app: { report?: string } | undefined,
+  root: string,
+  readTarget: (cell: string | undefined) => string | null = firstMarkdownLinkTarget,
+): string[] {
+  const linked = readTarget(app?.report);
+  if (!linked) return [];
+  const paths = [...trackerLinkDirs(root), root].map((dir) => path.resolve(dir, linked));
+  return [...new Set(paths)].filter((p) => p.endsWith(".md") && !isReservedReportFile(p));
+}
+
+/** The first of linkedReportPaths that resolves inside the project. */
+function linkedReportFile(app: { report?: string } | undefined, root: string): string | null {
+  // Containment: a hand-edited link must not resolve outside the project.
+  return linkedReportPaths(app, root).find((p) => containedRealpath(p, root)) ?? null;
+}
+
+/** Text of the report a tracker row links to, or null. The What's New
+ *  suppression reads its `**URL:**` (lib/whats-new-suppression.mjs). Link
+ *  only, never findReportFile's number fallback: row and report numbers drift
+ *  apart (#1733), and a guessed report would hand the row another posting's
+ *  URL. For the same reason the cell must be exactly one link, as the core's
+ *  `soleMarkdownLink` asks: with two, which one is the evaluated report is a
+ *  guess. Null (no sole link, or the report is missing) means "URL unknown"
+ *  there and falls back to the company + role match. Any other read failure
+ *  throws: a report that exists but cannot be read is broken, and reading it
+ *  as unknown would hide a second posting with the same title with no
+ *  signal. */
+export function readLinkedReport(app: { report?: string }): string | null {
+  const root = careerOpsRoot();
+  for (const file of linkedReportPaths(app, root, soleMarkdownLinkTarget)) {
+    try {
+      // containedRealpath's check, inline: it reads every resolution failure as
+      // "not found", and here only ENOENT and ENOTDIR may. A reports dir
+      // without traversal permission (EACCES) or a symlink loop (ELOOP) is
+      // broken, not absent.
+      if (!fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) continue;
+      // Reports live in the user's runtime checkout, outside the web build graph.
+      return fs.readFileSync(/* turbopackIgnore: true */ file, "utf8");
+    } catch (err) {
+      // Not in this folder, or deleted since it resolved: try the next one.
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      // EISDIR's message names no file, so name it here.
+      throw new Error(
+        `report ${path.relative(root, file)} could not be read: ${(err as Error)?.message ?? "unknown error"}`,
+        { cause: err },
+      );
+    }
+  }
+  // No link, or no folder holds the report: unknown.
+  return null;
 }
 
 /** True containment check: resolves symlinks before comparing, so a link

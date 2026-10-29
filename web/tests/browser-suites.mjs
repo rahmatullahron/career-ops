@@ -52,6 +52,7 @@ const SUITES = {
   "assistant-markdown-lazy": { url: "ASSISTANT_MARKDOWN_LAZY_TEST_URL", fixture: "blank" },
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
+  "chrome-overlap": { url: "CHROME_OVERLAP_TEST_URL", fixture: "pipeline-status" },
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
   "evaluation-options": { url: "EVALUATION_OPTIONS_TEST_URL", fixture: "inbox-undo" },

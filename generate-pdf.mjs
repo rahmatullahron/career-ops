@@ -1749,6 +1749,10 @@ async function generatePDF() {
     console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
     process.exit(1);
   }
+  if (!reportSupplied && !reportNum) {
+    const m = (outputPath || inputPath || '').match(/[-_](\d{3})[-_]/);
+    if (m) reportNum = m[1];
+  }
 
   if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
     console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -613,7 +614,7 @@ async function main() {
   };
   const reportPath = resolve(args.report);
   const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
-  writeFileSync(reportPath, updated, 'utf-8');
+  replaceUserFile(reportPath, updated);
 
   const normalized = normalizeApplicationAnswersSnapshot(snapshot);
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));

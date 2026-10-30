@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -17,7 +17,7 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
@@ -68,8 +68,6 @@ export function PipelineView({
   // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
   const [q, setQ] = useState(params.get("q") ?? "");
-  // Typing stays local, so include it explicitly when leaving the list.
-  const detailQuery = pipelineQuery(params.toString(), q);
   const lastUrlQ = useRef(params.get("q") ?? "");
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
@@ -109,6 +107,26 @@ export function PipelineView({
   // runs at low priority, and React drops a stale render when the next
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
+  // The rendered link keeps the deferred search, so a keystroke does not
+  // re-render every row. A click reads the box as it is now.
+  const qRef = useRef(q);
+  const paramsRef = useRef(params.toString());
+  const routerRef = useRef(router);
+  qRef.current = q;
+  paramsRef.current = params.toString();
+  routerRef.current = router;
+  const detailQuery = pipelineQuery(params.toString(), deferredQ);
+  const followDetail = useCallback((event: React.MouseEvent<HTMLAnchorElement>, n: string) => {
+    const href = trackerDetailHref(n, paramsRef.current, qRef.current);
+    event.currentTarget.href = href;
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1;
+    if (modified) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  const stampDetail = useCallback((event: React.PointerEvent<HTMLAnchorElement>, n: string) => {
+    event.currentTarget.href = trackerDetailHref(n, paramsRef.current, qRef.current);
+  }, []);
 
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
@@ -138,14 +156,32 @@ export function PipelineView({
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
   const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
 
-  function toggleRow(key: string) {
+  const toggleRow = useCallback((key: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  }
+  }, []);
+
+  const onStatusSaved = useCallback(
+    (r: Application, status: string, restoreFocus: boolean) => {
+      const key = applicationKey(r);
+      // If this focused row leaves its tab, preserve a useful
+      // focus target. Do not interrupt someone using search.
+      const focusedRow = document.activeElement?.closest("tr");
+      if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+        activeTab.current?.focus();
+      }
+      setAnnouncement(`Application #${r.n} status saved as ${status}.`);
+      startTransition(() => {
+        showSavedStatus({ key, status });
+        router.refresh();
+      });
+    },
+    [tab, router, showSavedStatus],
+  );
 
   function downloadCsv() {
     const url = URL.createObjectURL(new Blob([trackerCsv(filtered)], { type: "text/csv;charset=utf-8" }));
@@ -354,77 +390,18 @@ export function PipelineView({
             {/* Keep editors mounted while query navigation is pending: sorting
                 must not discard an open editor or an in-flight status save. */}
             <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
-              {filtered.map((r) => {
-                const company = companyPresentation(r);
-                const key = applicationKey(r);
-                const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
-                const posting = postingHref(r.url);
-                return (
-                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
-                    <td className="w-8 px-3 py-3">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
-                        checked={selected.has(key)}
-                        onChange={() => toggleRow(key)}
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand-text">
-                        #{r.n}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
-                        <CompanyLogo name={company.logoName} size={20} />
-                        {company.label}
-                      </Link>
-                    </td>
-                  <td className="px-4 py-3 text-muted">
-                    <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
-                      {posting && (
-                        <a
-                          href={posting}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={posting}
-                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
-                        >
-                          {postingLabel(posting)}
-                          <ExternalLink className="size-3" />
-                        </a>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    <StatusSelect
-                      n={r.n}
-                      current={r.status}
-                      inline
-                      applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
-                      onSaved={(status, restoreFocus) => {
-                        // If this focused row leaves its tab, preserve a useful
-                        // focus target. Do not interrupt someone using search.
-                        const focusedRow = document.activeElement?.closest("tr");
-                        if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
-                          activeTab.current?.focus();
-                        }
-                        setAnnouncement(`Application #${r.n} status saved as ${status}.`);
-                        startTransition(() => {
-                          showSavedStatus({ key, status });
-                          router.refresh();
-                        });
-                      }}
-                    />
-                  </td>
-                  <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
-                  </tr>
-                );
-              })}
+              {filtered.map((r) => (
+                <TrackerRow
+                  key={applicationKey(r)}
+                  r={r}
+                  selected={selected.has(applicationKey(r))}
+                  detailQuery={detailQuery}
+                  onToggle={toggleRow}
+                  onSaved={onStatusSaved}
+                  onOpen={followDetail}
+                  onArm={stampDetail}
+                />
+              ))}
             </tbody>
             {isPending && (
               <tbody className="divide-y divide-border" aria-busy="true">
@@ -439,6 +416,84 @@ export function PipelineView({
     </PageFrame>
   );
 }
+
+const TrackerRow = memo(function TrackerRow({
+  r,
+  selected,
+  detailQuery,
+  onToggle,
+  onSaved,
+  onOpen,
+  onArm,
+}: {
+  r: Application;
+  selected: boolean;
+  detailQuery: string;
+  onToggle: (key: string) => void;
+  onSaved: (r: Application, status: string, restoreFocus: boolean) => void;
+  onOpen: (event: React.MouseEvent<HTMLAnchorElement>, n: string) => void;
+  onArm: (event: React.PointerEvent<HTMLAnchorElement>, n: string) => void;
+}) {
+  const company = companyPresentation(r);
+  const key = applicationKey(r);
+  const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
+  const posting = postingHref(r.url);
+  const open = (event: React.MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n);
+  const arm = (event: React.PointerEvent<HTMLAnchorElement>) => onArm(event, r.n);
+  return (
+    <tr data-application-key={key} className="group transition-colors hover:bg-surface/40">
+      <td className="w-8 px-3 py-3">
+        <input
+          type="checkbox"
+          aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
+          checked={selected}
+          onChange={() => onToggle(key)}
+        />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+        <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
+          #{r.n}
+        </Link>
+      </td>
+      <td className="px-4 py-3 font-medium">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+          <CompanyLogo name={company.logoName} size={20} />
+          {company.label}
+        </Link>
+      </td>
+      <td className="px-4 py-3 text-muted">
+        <div className="flex items-center gap-2">
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open}>{r.role}</Link>
+          {posting && (
+            <a
+              href={posting}
+              target="_blank"
+              rel="noreferrer"
+              title={posting}
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
+            >
+              {postingLabel(posting)}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-muted">
+        <StatusSelect
+          n={r.n}
+          current={r.status}
+          inline
+          applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+          onSaved={(status, restoreFocus) => onSaved(r, status, restoreFocus)}
+        />
+      </td>
+      <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+    </tr>
+  );
+});
 
 function EmptyTracker({
   shape,
